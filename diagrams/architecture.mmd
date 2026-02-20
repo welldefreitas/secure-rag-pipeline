@@ -1,53 +1,43 @@
 flowchart LR
-  %% =========================
-  %% Secure RAG Pipeline (MVP)
-  %% =========================
+  %% Secure RAG Pipeline (MVP) - GitHub Mermaid compatible
 
-  %% ---- External ----
-  subgraph EXT[External / Untrusted Zone]
+  subgraph EXT[External - Untrusted Zone]
     U[User / Client App]
     A[Admin / Ingest Client]
   end
 
-  %% ---- API Boundary ----
   subgraph API[API Boundary - FastAPI Service]
-    GW[API Routes<br/>/chat • /ingest • /health]
-    RID[Request ID / Correlation ID]
-    AUTHN[AuthN<br/>JWT Validation]
-    AUTHZ[AuthZ Policy Guard<br/>Tenant Ownership + Source Allowlist]
-    REDACT[Redaction Layer<br/>PII/Secrets scrub]
+    GW[API Routes: /chat /ingest /health]
+    RID[Correlation ID]
+    AUTHN[AuthN: JWT Validation]
+    AUTHZ[AuthZ Policy Guard: Tenant + Source Allowlist]
+    REDACT[Redaction Layer: PII/Secrets]
     RAG[RAG Orchestrator]
-    FILTERS[Content Filters<br/>Prompt Injection / Unsafe Chunks]
-    PROMPT[Prompt Assembler<br/>Bounded instructions + citations]
+    FILTERS[Content Filters: Injection / Unsafe Chunks]
+    PROMPT[Prompt Assembler: Boundaries + Citations]
   end
 
-  %% ---- Data Plane ----
   subgraph DATA[Data Plane]
     VS[(Vector Store)]
-    MS[(Metadata Store<br/>tenant_id • source • labels)]
-    DS[(Document Store / Blobs<br/>(optional))]
+    MS[(Metadata Store: tenant_id, source, labels)]
+    DS[Document Store / Blobs - optional]
   end
 
-  %% ---- Model Boundary ----
   subgraph LLM[Model Boundary]
-    LLMAPI[LLM Provider / Local LLM<br/>(pluggable adapter)]
+    LLMAPI[LLM Provider / Local LLM Adapter]
   end
 
-  %% ---- Observability ----
   subgraph OBS[Observability]
-    LOGS[Structured Logs<br/>Redacted]
-    METRICS[Metrics / Traces<br/>(optional)]
+    LOGS[Structured Logs - Redacted]
+    METRICS[Metrics / Traces - optional]
   end
-
-  %% =========================
-  %% Flows
-  %% =========================
 
   %% Chat flow
   U -->|POST /chat| GW
   GW --> RID
   GW --> AUTHN --> AUTHZ
-  AUTHZ -->|deny/allow| RAG
+  AUTHZ -->|allow| RAG
+  AUTHZ -->|deny| U
 
   RAG -->|tenant-bound query| VS
   RAG --> MS
@@ -68,18 +58,8 @@ flowchart LR
   RAG --> REDACT --> LOGS
   RAG -->|ingest result| A
 
-  %% Health checks
-  GW -->|/health /ready| LOGS
-
   %% Observability links
   RID --> LOGS
   FILTERS --> LOGS
   AUTHZ --> LOGS
   LOGS --> METRICS
-
-  %% =========================
-  %% Trust & Risk Notes
-  %% =========================
-  %% - Retrieved chunks are treated as untrusted input (injection risk).
-  %% - Tenant isolation enforced BEFORE retrieval (deny-by-default).
-  %% - Redaction occurs before logging and before LLM calls if needed.
