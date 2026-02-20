@@ -1,7 +1,7 @@
-%% Secure RAG Pipeline Architecture - Optimized Layout
-graph TD
+%% Secure RAG Pipeline Architecture - Optimized Layout (GitHub compatible)
+flowchart TD
 
-  %% Define Styles
+  %% Define Styles (GitHub supports classDef, may simplify colors if needed)
   classDef external fill:#f9f9f9,stroke:#333,stroke-width:2px;
   classDef api fill:#e6f3ff,stroke:#0066cc,stroke-width:2px;
   classDef security fill:#fff0e6,stroke:#ff6600,stroke-width:2px;
@@ -10,76 +10,70 @@ graph TD
   classDef obs fill:#fffbe6,stroke:#cccc00,stroke-width:2px;
 
   %% Zones
-  subgraph EXT [External Zone - Untrusted]
-    direction LR
-    USER(["User / Client App"]):::external
-    ADMIN(["Admin / Ingest Client"]):::external
+  subgraph EXT[External Zone - Untrusted]
+    USER([User / Client App]):::external
+    ADMIN([Admin / Ingest Client]):::external
   end
 
-  subgraph API_BOUNDARY [API Boundary - FastAPI]
-    direction TB
-    GW["API Gateway Routes<br/>/chat | /ingest"]:::api
-    
-    subgraph SECURITY_GATE [Security Enforcement]
-        direction LR
-        AUTHN["AuthN: JWT Validation"]:::security
-        AUTHZ["AuthZ: Tenant Policy Guard"]:::security
-        REDACT["PII Redactor"]:::security
+  subgraph API_BOUNDARY[API Boundary - FastAPI]
+    GW[API Gateway Routes\n/chat\n/ingest]:::api
+
+    subgraph SECURITY_GATE[Security Enforcement]
+      AUTHN[AuthN: JWT Validation]:::security
+      AUTHZ[AuthZ: Tenant Policy Guard]:::security
+      REDACT[PII Redactor]:::security
     end
-    
-    RAG["RAG Orchestrator"]:::api
-    
-    subgraph CONTENT_DEFENSE [Content Defense]
-        direction LR
-        FILTERS["Injection Filters"]:::security
-        PROMPT["Prompt Assembler<br/>+ Citations"]:::security
+
+    RAG[RAG Orchestrator]:::api
+
+    subgraph CONTENT_DEFENSE[Content Defense]
+      FILTERS[Injection Filters]:::security
+      PROMPT[Prompt Assembler\n+ Citations]:::security
     end
   end
 
-  subgraph DATA_PLANE [Data Plane - Isolated]
-    direction LR
-    VS[("Vector Store<br/>Qdrant")]:::data
-    MS[("Metadata Store<br/>Tenant ID")]:::data
+  subgraph DATA_PLANE[Data Plane - Isolated]
+    VS[(Vector Store\nQdrant)]:::data
+    MS[(Metadata Store\nTenant ID / Source)]:::data
   end
 
-  subgraph MODEL [Model Boundary - Secure]
-    LLM[["Local LLM Engine"]]:::llm
+  subgraph MODEL[Model Boundary - Secure]
+    LLM[[Local LLM Engine]]:::llm
   end
 
-  subgraph OBS [Observability]
-    LOGS{"Structured Logs<br/>Redacted"}:::obs
+  subgraph OBS[Observability]
+    LOGS[Structured Logs\nRedacted]:::obs
   end
 
   %% --- Relationships and Flow ---
 
-  %% User Flow
-  USER -- POST /chat --> GW
-  ADMIN -- POST /ingest --> GW
+  %% Entry
+  USER -- "POST /chat" --> GW
+  ADMIN -- "POST /ingest" --> GW
 
-  %% API Processing
-  GW --> AUTHN
-  AUTHN --> AUTHZ
+  %% Security chain
+  GW --> AUTHN --> AUTHZ
   AUTHZ -- Allow --> RAG
   AUTHZ -- Deny --> USER
 
-  %% RAG Orchestration (Retrieval)
-  RAG -- Tenant-bound query --> VS
-  RAG -. Lookup .-> MS
-  
-  %% Data Return & Defense
-  VS -- Top-K Chunks --> FILTERS
-  FILTERS -- Clean Chunks --> PROMPT
-  
-  %% LLM Generation
+  %% Retrieval
+  RAG -- "Tenant-bound query" --> VS
+  RAG -. "Lookup" .-> MS
+
+  %% Defense
+  VS -- "Top-K chunks" --> FILTERS
+  FILTERS -- "Clean chunks" --> PROMPT
+
+  %% Generation
   PROMPT --> LLM
-  LLM -- Generated Answer --> RAG
-  
-  %% Output & Logging
+  LLM -- "Generated answer" --> RAG
+
+  %% Output + redaction
   RAG --> REDACT
-  REDACT -- Masked Response --> USER
-  
-  %% Observability Links (Dotted)
-  GW -. Correlation ID .-> LOGS
-  AUTHZ -. Access Logs .-> LOGS
-  REDACT -. Sanitized Data .-> LOGS
-  FILTERS -. Threat Intel .-> LOGS
+  REDACT -- "Masked response" --> USER
+
+  %% Observability (dotted)
+  GW -. "Correlation ID" .-> LOGS
+  AUTHZ -. "Access logs" .-> LOGS
+  REDACT -. "Sanitized data" .-> LOGS
+  FILTERS -. "Threat intel" .-> LOGS
