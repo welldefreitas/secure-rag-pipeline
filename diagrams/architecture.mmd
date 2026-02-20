@@ -1,4 +1,9 @@
-```
+
+---
+
+## `diagrams/architecture.mmd` (Mermaid)
+
+```text
 flowchart LR
   %% =========================
   %% Secure RAG Pipeline (MVP)
@@ -84,4 +89,3 @@ flowchart LR
   %% - Retrieved chunks are treated as untrusted input (injection risk).
   %% - Tenant isolation enforced BEFORE retrieval (deny-by-default).
   %% - Redaction occurs before logging and before LLM calls if needed.
-```
