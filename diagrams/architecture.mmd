@@ -1,0 +1,87 @@
+```
+flowchart LR
+  %% =========================
+  %% Secure RAG Pipeline (MVP)
+  %% =========================
+
+  %% ---- External ----
+  subgraph EXT[External / Untrusted Zone]
+    U[User / Client App]
+    A[Admin / Ingest Client]
+  end
+
+  %% ---- API Boundary ----
+  subgraph API[API Boundary - FastAPI Service]
+    GW[API Routes<br/>/chat • /ingest • /health]
+    AUTHN[AuthN<br/>JWT Validation]
+    AUTHZ[AuthZ Policy Guard<br/>Tenant Ownership + Source Allowlist]
+    RID[Request ID / Correlation ID]
+    REDACT[Redaction Layer<br/>PII/Secrets scrub]
+    RAG[RAG Orchestrator]
+    FILTERS[Content Filters<br/>Prompt Injection / Unsafe Chunks]
+    PROMPT[Prompt Assembler<br/>Bounded instructions + citations]
+  end
+
+  %% ---- Data Plane ----
+  subgraph DATA[Data Plane]
+    VS[(Vector Store)]
+    MS[(Metadata Store<br/>tenant_id • source • labels)]
+    DS[(Document Store / Blobs<br/>(optional))]
+  end
+
+  %% ---- Model Boundary ----
+  subgraph LLM[Model Boundary]
+    LLMAPI[LLM Provider / Local LLM<br/>(pluggable adapter)]
+  end
+
+  %% ---- Observability ----
+  subgraph OBS[Observability]
+    LOGS[Structured Logs<br/>Redacted]
+    METRICS[Metrics / Traces<br/>(optional)]
+  end
+
+  %% =========================
+  %% Flows
+  %% =========================
+
+  %% Chat flow
+  U -->|POST /chat| GW
+  GW --> RID
+  GW --> AUTHN --> AUTHZ
+  AUTHZ -->|deny/allow| RAG
+
+  RAG -->|tenant-bound query| VS
+  RAG --> MS
+  RAG -->|optional fetch| DS
+
+  VS -->|top-k chunks| FILTERS
+  FILTERS -->|clean chunks| PROMPT
+  PROMPT --> LLMAPI -->|answer| RAG
+  RAG --> REDACT --> LOGS
+  RAG -->|response + citations| U
+
+  %% Ingest flow
+  A -->|POST /ingest| GW
+  GW --> AUTHN --> AUTHZ
+  AUTHZ -->|allow| RAG
+  RAG -->|chunk + embed + store| VS
+  RAG -->|write metadata| MS
+  RAG --> REDACT --> LOGS
+  RAG -->|ingest result| A
+
+  %% Health checks
+  GW -->|/health /ready| LOGS
+
+  %% Observability
+  RID --> LOGS
+  FILTERS --> LOGS
+  AUTHZ --> LOGS
+  LOGS --> METRICS
+
+  %% =========================
+  %% Trust & Risk Notes
+  %% =========================
+  %% - Retrieved chunks are treated as untrusted input (injection risk).
+  %% - Tenant isolation enforced BEFORE retrieval (deny-by-default).
+  %% - Redaction occurs before logging and before LLM calls if needed.
+```
