@@ -1,0 +1,27 @@
+---
+
+# Enterprise YAML lint configuration
+# Author: Wellington de Freitas
+# Purpose: Enforce consistency without breaking productivity
+
+extends: default
+
+rules:
+
+  line-length:
+    max: 140   # Enterprise standard (GitHub uses 140)
+    level: warning
+
+  document-start:
+    present: false   # "---" optional
+
+  truthy:
+    allowed-values: ['true', 'false', 'on']
+    level: warning
+
+  comments:
+    require-starting-space: true
+
+  indentation:
+    spaces: 2
+    indent-sequences: true
