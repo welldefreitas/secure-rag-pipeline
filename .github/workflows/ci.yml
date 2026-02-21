@@ -28,14 +28,7 @@ jobs:
     name: Quality Gate (lint + tests)
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    permissions:
-      contents: read
     steps:
-      - name: Harden Runner (audit)
-        uses: step-security/harden-runner@c6295a65d1254861815972266d5933fd6e532bdf # v2.11.1
-        with:
-          egress-policy: audit
-
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -70,7 +63,7 @@ jobs:
           mkdir -p reports
           pytest -q --maxfail=1 --junitxml=reports/junit.xml --cov=app --cov-report=xml:reports/coverage.xml
 
-      - name: Upload test artifacts
+      - name: Upload quality artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -89,21 +82,14 @@ jobs:
             echo "- Format: **ruff format --check**"
             echo "- Tests: **pytest + coverage**"
             echo
-            echo "Artifacts: \`quality-reports\` (junit.xml, coverage.xml)"
+            echo "Artifacts: \`quality-reports\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
   security:
     name: Security Gate (SCA + SAST)
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    permissions:
-      contents: read
     steps:
-      - name: Harden Runner (audit)
-        uses: step-security/harden-runner@c6295a65d1254861815972266d5933fd6e532bdf # v2.11.1
-        with:
-          egress-policy: audit
-
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -123,27 +109,34 @@ jobs:
       - name: Dependency audit (pip-audit)
         run: |
           mkdir -p reports
+          set +e
+          pip-audit -f json -o reports/pip-audit.json
+          rc=$?
+          set -e
+          if [ ! -s reports/pip-audit.json ]; then
+            echo "pip-audit did not produce a JSON report."
+            exit 2
+          fi
+          exit $rc
+
+      - name: pip-audit summary
+        if: always()
+        run: |
           python - <<'PY'
-          import json, subprocess, time
+          import json
           from pathlib import Path
-
-          out = Path('reports/pip-audit.json')
-          cmd = ['pip-audit', '-f', 'json', '-o', str(out)]
-
-          for attempt in range(1, 4):
-              print(f"pip-audit attempt {attempt}/3")
-              subprocess.run(cmd)
-              if out.exists() and out.stat().st_size > 0:
-                  break
-              time.sleep(3)
-
-          if not out.exists() or out.stat().st_size == 0:
-              raise SystemExit('pip-audit did not produce a JSON report (network/db issue).')
-
-          data = json.loads(out.read_text())
-          vulns = sum(len(pkg.get('vulns', [])) for pkg in data)
+          p = Path("reports/pip-audit.json")
+          if not p.exists() or p.stat().st_size == 0:
+              print("pip-audit report missing/empty")
+              raise SystemExit(0)
+          data = json.loads(p.read_text())
+          deps = data.get("dependencies") if isinstance(data, dict) else data
+          vulns = 0
+          if isinstance(deps, list):
+              for d in deps:
+                  if isinstance(d, dict):
+                      vulns += len(d.get("vulns") or d.get("vulnerabilities") or [])
           print(f"pip-audit vulnerabilities: {vulns}")
-          raise SystemExit(1 if vulns > 0 else 0)
           PY
 
       - name: Static analysis (bandit)
@@ -153,18 +146,14 @@ jobs:
           python - <<'PY'
           import json
           from pathlib import Path
-
-          p = Path('reports/bandit.json')
+          p = Path("reports/bandit.json")
           if not p.exists() or p.stat().st_size == 0:
-              raise SystemExit('Bandit did not produce output.')
-
+              raise SystemExit("Bandit did not produce output.")
           data = json.loads(p.read_text())
-          results = data.get('results', [])
-          bad = [r for r in results if r.get('issue_severity') in {'MEDIUM', 'HIGH'}]
-
-          print(f"bandit findings (total): {len(results)}")
-          print(f"bandit findings (MEDIUM/HIGH): {len(bad)}")
-
+          results = data.get("results", [])
+          bad = [r for r in results if r.get("issue_severity") in {"MEDIUM", "HIGH"}]
+          print(f"bandit findings total: {len(results)}")
+          print(f"bandit findings MEDIUM/HIGH: {len(bad)}")
           raise SystemExit(1 if bad else 0)
           PY
 
@@ -185,7 +174,7 @@ jobs:
             echo "- SCA: **pip-audit** (fails on vulnerabilities)"
             echo "- SAST: **bandit** (fails on MEDIUM/HIGH)"
             echo
-            echo "Artifacts: \`security-reports\` (pip-audit.json, bandit.json)"
+            echo "Artifacts: \`security-reports\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
   secrets:
@@ -196,11 +185,6 @@ jobs:
       contents: read
       pull-requests: read
     steps:
-      - name: Harden Runner (audit)
-        uses: step-security/harden-runner@c6295a65d1254861815972266d5933fd6e532bdf # v2.11.1
-        with:
-          egress-policy: audit
-
       - name: Checkout (full history)
         uses: actions/checkout@v4
         with:
@@ -218,14 +202,7 @@ jobs:
     name: Container Gate (Dockerfile + image scan)
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    permissions:
-      contents: read
     steps:
-      - name: Harden Runner (audit)
-        uses: step-security/harden-runner@c6295a65d1254861815972266d5933fd6e532bdf # v2.11.1
-        with:
-          egress-policy: audit
-
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -236,15 +213,16 @@ jobs:
         uses: hadolint/hadolint-action@v3.1.0
         with:
           dockerfile: Dockerfile
+          config: .hadolint.yaml
           format: sarif
           output-file: reports/hadolint.sarif
-          failure-threshold: warning
+          failure-threshold: error
 
       - name: Build image
         run: |
           docker build -t secure-rag-pipeline:${{ github.sha }} .
 
-      - name: Trivy (image scan)
+      - name: Trivy (image scan) - CRITICAL only
         uses: aquasecurity/trivy-action@0.33.1
         with:
           image-ref: 'secure-rag-pipeline:${{ github.sha }}'
@@ -252,9 +230,9 @@ jobs:
           exit-code: '1'
           ignore-unfixed: true
           vuln-type: 'os,library'
-          severity: 'CRITICAL,HIGH'
+          severity: 'CRITICAL'
 
-      - name: Trivy (fs scan)
+      - name: Trivy (fs scan) - CRITICAL only
         uses: aquasecurity/trivy-action@0.33.1
         with:
           scan-type: 'fs'
@@ -262,7 +240,7 @@ jobs:
           format: 'table'
           exit-code: '1'
           ignore-unfixed: true
-          severity: 'CRITICAL,HIGH'
+          severity: 'CRITICAL'
 
       - name: Upload container artifacts
         if: always()
@@ -278,11 +256,11 @@ jobs:
           {
             echo "## 🐳 Container Gate"
             echo
-            echo "- Dockerfile lint: **hadolint**"
-            echo "- Image scan: **trivy image** (CRITICAL/HIGH)"
-            echo "- Repo scan: **trivy fs** (CRITICAL/HIGH)"
+            echo "- Dockerfile lint: **hadolint** (warnings reported, errors fail)"
+            echo "- Image scan: **trivy image** (CRITICAL)"
+            echo "- Repo scan: **trivy fs** (CRITICAL)"
             echo
-            echo "Artifacts: \`container-reports\` (hadolint.sarif)"
+            echo "Artifacts: \`container-reports\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
   codeql:

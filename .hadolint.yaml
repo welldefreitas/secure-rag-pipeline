@@ -1,0 +1,7 @@
+# Hadolint policy for this repo.
+# Rationale:
+# - DL3008 (apt pinning): pinning distro package versions is brittle; we rely on slim base images + rebuild cadence.
+# - DL3013 (pip pinning): pinning is handled by lockfiles in client deployments; this repo is a reference implementation.
+ignored:
+  - DL3008
+  - DL3013

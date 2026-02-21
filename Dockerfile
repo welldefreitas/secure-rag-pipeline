@@ -10,7 +10,7 @@ RUN useradd -m -u 10001 appuser
 WORKDIR /app
 
 COPY pyproject.toml README.md LICENSE ./
-RUN python -m pip install -U pip \
+RUN python -m pip install --no-cache-dir -U pip \
   && python -m pip install --no-cache-dir -e .
 
 COPY app ./app
