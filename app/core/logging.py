@@ -3,19 +3,22 @@ from __future__ import annotations
 import json
 import logging
 import sys
-from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 
 class JsonFormatter(logging.Formatter):
     """Minimal JSON logs (stdout), PII-safe by design.
 
-    IMPORTANT: never log raw prompts or raw retrieved chunks.
+    IMPORTANT:
+      - never log raw prompts
+      - never log raw retrieved chunks
+      - keep correlation IDs and tenant IDs for auditability
     """
 
     def format(self, record: logging.LogRecord) -> str:
-        base: Dict[str, Any] = {
-            "ts": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
+        base: dict[str, Any] = {
+            "ts": datetime.now(UTC).isoformat(timespec="milliseconds"),
             "level": record.levelname,
             "logger": record.name,
             "msg": record.getMessage(),

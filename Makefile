@@ -10,7 +10,7 @@ install: ## Install deps (dev)
 	python -m pip install -e ".[dev]"
 
 run: ## Run API locally (uvicorn)
-	uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+	uvicorn app.main:create_app --factory --host 0.0.0.0 --port 8000 --reload
 
 test: ## Run unit tests
 	pytest --maxfail=1

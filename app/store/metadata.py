@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -24,7 +23,7 @@ class IngestRequest(BaseModel):
     tenant_id: str
     source: str = "unknown"
     text: str
-    doc_id: Optional[str] = None
+    doc_id: str | None = None
 
 
 class ChatRequest(BaseModel):

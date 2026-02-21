@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, List, Optional
+from typing import Annotated
 
 import jwt
 from fastapi import Depends, HTTPException
@@ -14,7 +14,7 @@ from app.core.config import get_settings
 class Principal:
     sub: str
     tenant_id: str
-    scopes: List[str]
+    scopes: list[str]
 
 
 bearer = HTTPBearer(auto_error=False)
@@ -28,13 +28,17 @@ def _forbidden(detail: str = "Forbidden") -> HTTPException:
     return HTTPException(status_code=403, detail=detail)
 
 
-def get_principal(
-    creds: Optional[HTTPAuthorizationCredentials] = Depends(bearer),
-) -> Principal:
+CredsDep = Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)]
+
+
+def get_principal(creds: CredsDep) -> Principal:
     """Validate JWT and return a Principal.
 
-    This is intentionally simple for a public repo MVP.
-    In production, prefer OIDC (JWKS), rotation, audiences, and stricter claims.
+    MVP note:
+      - uses a static shared secret from env (JWT_SECRET)
+      - no JWKS / OIDC / audience enforcement
+
+    In production: prefer OIDC + JWKS rotation, issuer/audience checks, and tighter claim validation.
     """
 
     if creds is None or creds.scheme.lower() != "bearer":
@@ -49,8 +53,8 @@ def get_principal(
             algorithms=[settings.jwt_algorithm],
             options={"verify_aud": False},
         )
-    except jwt.PyJWTError:
-        raise _unauthorized("Invalid token")
+    except jwt.PyJWTError as e:
+        raise _unauthorized("Invalid token") from e
 
     sub = str(payload.get("sub", ""))
     tenant_id = str(payload.get("tenant_id", ""))
@@ -65,18 +69,27 @@ def get_principal(
     return Principal(sub=sub, tenant_id=tenant_id, scopes=[str(s) for s in scopes])
 
 
+PrincipalDep = Annotated[Principal, Depends(get_principal)]
+
+
 def require_scopes(*required: str):
-    def dep(p: Principal = Depends(get_principal)) -> Principal:
+    """Dependency factory enforcing OAuth-like scopes."""
+
+    def dep(p: PrincipalDep) -> Principal:
         if not required:
             return p
+
         missing = [s for s in required if s not in p.scopes]
         if missing:
             raise _forbidden("Missing required scope")
+
         return p
 
     return dep
 
 
 def enforce_tenant(expected_tenant_id: str, p: Principal) -> None:
+    """Hard tenant ownership enforcement (deny-by-default)."""
+
     if expected_tenant_id != p.tenant_id:
         raise _forbidden("Tenant mismatch")

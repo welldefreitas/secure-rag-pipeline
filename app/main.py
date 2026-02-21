@@ -25,6 +25,14 @@ def _build_pipeline(store: VectorStoreAdapter) -> RagPipeline:
 
 
 def create_app() -> FastAPI:
+    """FastAPI application factory.
+
+    Use with Uvicorn:
+      - uvicorn app.main:create_app --factory
+
+    This avoids module import side-effects (important for tests and env overrides).
+    """
+
     settings = get_settings()
     configure_logging(settings.log_level)
 
@@ -71,6 +79,3 @@ def create_app() -> FastAPI:
     app.include_router(ingest_router)
 
     return app
-
-
-app = create_app()

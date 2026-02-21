@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import List
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -33,7 +32,7 @@ class Settings(BaseSettings):
     qdrant_url: str = Field(default="http://qdrant:6333", alias="QDRANT_URL")
 
     @property
-    def allowlist_sources_list(self) -> List[str]:
+    def allowlist_sources_list(self) -> list[str]:
         if not self.allowlist_sources.strip():
             return []
         return [s.strip() for s in self.allowlist_sources.split(",") if s.strip()]

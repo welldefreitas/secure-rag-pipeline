@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Iterable, List
+from collections.abc import Iterable
 
 from app.core.config import get_settings
 from app.rag.filters import check_prompt_injection
@@ -23,13 +23,14 @@ def allowlisted_source(source: str) -> bool:
     return source.strip() in allow
 
 
-def filter_retrieved_chunks(chunks: Iterable[tuple[str, str]]) -> List[tuple[str, str]]:
+def filter_retrieved_chunks(chunks: Iterable[tuple[str, str]]) -> list[tuple[str, str]]:
     """Remove obviously malicious retrieved content.
 
-    chunks: list of (source, text)
+    chunks: iterable of (source, text)
     """
 
-    safe: List[tuple[str, str]] = []
+    safe: list[tuple[str, str]] = []
+
     for source, text in chunks:
         if not allowlisted_source(source):
             continue
@@ -38,4 +39,5 @@ def filter_retrieved_chunks(chunks: Iterable[tuple[str, str]]) -> List[tuple[str
         res = check_prompt_injection(text)
         if res.ok:
             safe.append((source, text))
+
     return safe
