@@ -1,93 +1,153 @@
 <div align="center">
 
 # 🔒 Enterprise Secure RAG Pipeline
-### Zero-Leakage Retrieval-Augmented Generation with FastAPI, Tenant Isolation, and OWASP LLM Top 10 Guardrails.
+### Secure-by-design Retrieval-Augmented Generation with FastAPI, tenant isolation, and OWASP LLM Top 10 guardrails.
 
 [![CI Pipeline](https://img.shields.io/github/actions/workflow/status/welldefreitas/secure-rag-pipeline/ci.yml?style=for-the-badge)](https://github.com/welldefreitas/secure-rag-pipeline/actions)
-![Python](https://img.shields.io/badge/Python-3.11-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.12-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)
-![Security](https://img.shields.io/badge/OWASP-LLM_Top_10-E4405F?style=for-the-badge)
+![Security](https://img.shields.io/badge/OWASP-LLM_Top_10-000000?style=for-the-badge&logo=owasp&logoColor=white)
 
-**Goal:** Build a production-ready, secure-by-design AI pipeline that reads corporate documents without leaking sensitive data (PII) or falling victim to Prompt Injections.
+**Goal:** Demonstrate a **consulting-grade** RAG architecture that can ingest internal documents and answer questions **without tenant leakage**, **without logging PII**, and **with prompt-injection defenses**.
 
 </div>
 
 ---
 
-## 🎯 Business Value (Why this repo exists)
+## Why this repo exists
 
-Organizations want the power of Generative AI, but cannot risk uploading confidential PDFs to public APIs or mixing department data. This repository demonstrates a **Consulting-Grade RAG Architecture** that provides:
+Most RAG demos stop at “it answers questions”. Enterprises need proof that it answers **safely**:
 
-1. **Tenant Isolation (AuthZ):** Vector database access controls prevent cross-contamination (e.g., HR cannot query Finance documents).
-2. **PII & Secrets Redaction:** Automatically masks Personally Identifiable Information *before* logging or LLM processing.
-3. **Prompt Guard (Injection Defense):** Heuristic and pattern-based filters to block malicious inputs and poisoned RAG chunks.
-4. **Deny-by-Default Architecture:** Strict data boundaries and structured, PII-safe audit logging.
-
----
-
-## 🏗️ Architecture & Security Flow
-
-```text
-[ User Prompt (JWT Auth) ] 
-      │
-      ▼
-[ FastAPI Gateway ] ── (AuthZ / Tenant Enforcement / PII Redaction)
-      │
-      ▼
-[ RAG Core Filters ] ── (Prompt Injection Checks / Red Team Defenses)
-      │
-      ▼
-[ Vector DB (Qdrant) ] ── (Retrieval constrained by Tenant ID)
-      │
-      ▼
-[ Local/Secure LLM ] ── (Generates answer with strict Citations)
-```
+- ✅ **Tenant isolation** (ownership enforced at API boundary + storage query)
+- ✅ **Prompt injection defenses** (user input + retrieved chunks)
+- ✅ **PII/secrets redaction** (before logging and before model calls)
+- ✅ **Evidence-first answers** (citations returned; no evidence → refuse)
+- ✅ **Security gates in CI** (lint + tests + dependency audit + static analysis)
 
 ---
 
-## 🚀 Quickstart
+## Architecture
 
-**1) Clone and setup environment**
+- Mermaid diagram: `diagrams/architecture.mmd`
+- Deep dive docs:
+  - `docs/01-architecture.md`
+  - `docs/02-threat-model.md` (OWASP LLM Top 10 mapping)
+  - `docs/05-red-team-tests.md`
+
+---
+
+## API (MVP)
+
+### `POST /ingest` (admin/protected)
+Ingests raw text into a tenant-scoped store.
+
+### `POST /chat`
+Returns an evidence-based answer scoped to the tenant.
+
+### `GET /health` and `GET /ready`
+Basic liveness/readiness.
+
+---
+
+## Quickstart (local)
+
+### 1) Clone + env
 ```bash
 git clone https://github.com/welldefreitas/secure-rag-pipeline.git
 cd secure-rag-pipeline
 cp .env.example .env
 ```
 
-**2) Start the Infrastructure (API + Vector DB)**
+### 2) Run locally
+Option A — Docker:
 ```bash
 make up
 ```
 
-**3) Run the Security Red-Team Suite**
-Validates that prompt injections and tenant boundaries are actively defended:
+Option B — Python:
+```bash
+make install
+make run
+```
+
+### 3) Generate a demo JWT
+This repo uses a simple HS256 JWT for the public MVP.
+
+```bash
+python - <<'PY'
+import jwt
+secret = "change-me"  # must match JWT_SECRET in .env
+payload = {"sub": "demo", "tenant_id": "tenant-a", "scopes": ["chat", "ingest:write"]}
+print(jwt.encode(payload, secret, algorithm="HS256"))
+PY
+```
+
+### 4) Ingest + chat
+```bash
+TOKEN="<paste-token>"
+
+curl -sS -X POST http://127.0.0.1:8000/ingest \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"tenant_id":"tenant-a","source":"confluence","text":"Policy: never share secrets. Contact: alice@example.com"}'
+
+curl -sS -X POST http://127.0.0.1:8000/chat \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"tenant_id":"tenant-a","question":"What does the policy say?"}'
+```
+
+---
+
+## Red-team suite
+
+Runs a small set of attack prompts and validates secure behavior (block/deny where appropriate).
+
 ```bash
 make redteam
 ```
 
+Extend the suite in `docs/05-red-team-tests.md`.
+
 ---
 
-## 📦 Repository Structure
+## Repo structure
 
 ```text
 secure-rag-pipeline/
-├── .github/workflows/ci.yml       # CI: lint, tests, security checks
-├── docs/                          # Architecture, Threat Models & OWASP Mapping
-├── app/                           # FastAPI Backend & LangChain Core
-│   ├── api/                       # Chat & Ingestion Endpoints
-│   ├── core/                      # Auth, PII Redaction, Structured Logging
-│   ├── rag/                       # Guardrails, Prompt Filters, Citations
-│   └── store/                     # Tenant-bound Vector DB adapters
-├── tests/                         # Security Regression (Red Team, AuthZ)
-├── scripts/                       # Local Dev & Smoke Tests
-├── docker-compose.yml             # Local Vector DB & App Orchestration
-└── Makefile                       # Operator commands (run/test/lint)
+├── .github/workflows/ci.yml          # CI: lint, tests, security gates
+├── docs/                             # Architecture, threat model, controls library
+├── diagrams/                         # Mermaid diagram
+├── app/
+│   ├── api/                          # /chat, /ingest, /health
+│   ├── core/                         # config, logging, security, redaction
+│   ├── rag/                          # retrieval, guardrails, citations
+│   ├── store/                        # vector adapter + tenant metadata
+│   └── tests/                        # authz/injection/redaction/logging tests
+├── scripts/                          # smoke + redteam helpers
+├── docker-compose.yml                # local stack (qdrant optional)
+├── Dockerfile                        # non-root container
+├── Makefile                          # operator commands
+├── .env.example                      # env template
+├── security.md                       # short security summary
+└── LICENSE
 ```
 
 ---
 
-## 📜 License
-MIT — see `LICENSE` for details.
+## Notes (MVP trade-offs)
+
+- The default vector store is **in-memory** for fast demos and deterministic tests.
+- The LLM adapter is **mocked** in the MVP to keep the repo self-contained.
+- Production implementations should:
+  - use OIDC/JWKS validation
+  - use a durable vector store with server-side ACL
+  - implement stronger injection defenses (classifiers + policy engines)
+
+---
+
+## License
+MIT — see `LICENSE`.
 
 <br>
 

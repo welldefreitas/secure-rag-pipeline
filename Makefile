@@ -1,42 +1,42 @@
-SHELL := /bin/bash
+SHELL := /usr/bin/env bash
 
-.PHONY: help up down logs ps lint scan trivy compose-validate
+.PHONY: help install run test lint format security up down logs smoke redteam
 
-help:
-	@echo "Targets:"
-	@echo "  up               - Start stack (Docker Compose)"
-	@echo "  down             - Stop stack and remove volumes"
-	@echo "  logs             - Follow logs"
-	@echo "  ps               - Show containers"
-	@echo "  compose-validate - Validate compose config"
-	@echo "  lint             - Run local lint checks (yamllint + shellcheck)"
-	@echo "  trivy            - Run security scan (Trivy container)"
-	@echo "  scan             - Alias for trivy"
+help: ## Show available targets
+	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-14s\033[0m %s\n", $$1, $$2}'
 
-up:
-	docker compose up -d
+install: ## Install deps (dev)
+	python -m pip install -U pip
+	python -m pip install -e ".[dev]"
 
-down:
+run: ## Run API locally (uvicorn)
+	uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+test: ## Run unit tests
+	pytest --maxfail=1
+
+lint: ## Lint (ruff)
+	ruff check .
+	ruff format --check .
+
+format: ## Auto-format (ruff)
+	ruff format .
+
+security: ## Basic security gates (pip-audit + bandit)
+	pip-audit
+	bandit -q -r app
+
+up: ## Start local stack (docker compose)
+	docker compose up --build -d
+
+down: ## Stop local stack
 	docker compose down -v
 
-logs:
+logs: ## Tail logs
 	docker compose logs -f --tail=200
 
-ps:
-	docker compose ps
+smoke: ## Quick smoke checks (health endpoints)
+	bash scripts/smoke.sh
 
-compose-validate:
-	docker compose config -q
-
-lint:
-	yamllint -d "{extends: relaxed, rules: {line-length: {max: 140}}}" .
-	shellcheck scripts/*.sh
-
-trivy:
-	docker run --rm -v "$$PWD:/repo" aquasec/trivy:latest fs \
-	  --security-checks vuln,config,secret \
-	  --severity HIGH,CRITICAL \
-	  --exit-code 1 \
-	  /repo
-
-scan: trivy
+redteam: ## Run red-team prompt suite
+	bash scripts/redteam.sh

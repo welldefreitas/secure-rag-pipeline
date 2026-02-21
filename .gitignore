@@ -1,0 +1,19 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+.env
+.venv/
+venv/
+
+# editors
+.vscode/
+.idea/
+
+# OS
+.DS_Store

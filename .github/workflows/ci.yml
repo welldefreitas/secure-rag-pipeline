@@ -1,0 +1,309 @@
+name: CI (Quality & Security Gates)
+
+on:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      enable_codeql:
+        description: "Run CodeQL SAST (manual/opt-in)."
+        type: boolean
+        default: false
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PYTHONDONTWRITEBYTECODE: "1"
+
+jobs:
+  quality:
+    name: Quality Gate (lint + tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Harden Runner (audit)
+        uses: step-security/harden-runner@c6295a65d1254861815972266d5933fd6e532bdf # v2.11.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+          python -m pip check
+
+      - name: Static syntax check
+        run: |
+          python -m compileall -q app
+
+      - name: Lint (ruff)
+        run: |
+          ruff check .
+
+      - name: Format check (ruff)
+        run: |
+          ruff format --check .
+
+      - name: Unit tests (pytest)
+        run: |
+          mkdir -p reports
+          pytest -q --maxfail=1 --junitxml=reports/junit.xml --cov=app --cov-report=xml:reports/coverage.xml
+
+      - name: Upload test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quality-reports
+          path: reports/
+          if-no-files-found: ignore
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## ✅ Quality Gate"
+            echo
+            echo "- Python: **${PYTHON_VERSION}**"
+            echo "- Lint: **ruff check**"
+            echo "- Format: **ruff format --check**"
+            echo "- Tests: **pytest + coverage**"
+            echo
+            echo "Artifacts: \`quality-reports\` (junit.xml, coverage.xml)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  security:
+    name: Security Gate (SCA + SAST)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Harden Runner (audit)
+        uses: step-security/harden-runner@c6295a65d1254861815972266d5933fd6e532bdf # v2.11.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Dependency audit (pip-audit)
+        run: |
+          mkdir -p reports
+          python - <<'PY'
+          import json, subprocess, time
+          from pathlib import Path
+
+          out = Path('reports/pip-audit.json')
+          cmd = ['pip-audit', '-f', 'json', '-o', str(out)]
+
+          for attempt in range(1, 4):
+              print(f"pip-audit attempt {attempt}/3")
+              subprocess.run(cmd)
+              if out.exists() and out.stat().st_size > 0:
+                  break
+              time.sleep(3)
+
+          if not out.exists() or out.stat().st_size == 0:
+              raise SystemExit('pip-audit did not produce a JSON report (network/db issue).')
+
+          data = json.loads(out.read_text())
+          vulns = sum(len(pkg.get('vulns', [])) for pkg in data)
+          print(f"pip-audit vulnerabilities: {vulns}")
+          raise SystemExit(1 if vulns > 0 else 0)
+          PY
+
+      - name: Static analysis (bandit)
+        run: |
+          mkdir -p reports
+          bandit -q -r app -f json -o reports/bandit.json || true
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          p = Path('reports/bandit.json')
+          if not p.exists() or p.stat().st_size == 0:
+              raise SystemExit('Bandit did not produce output.')
+
+          data = json.loads(p.read_text())
+          results = data.get('results', [])
+          bad = [r for r in results if r.get('issue_severity') in {'MEDIUM', 'HIGH'}]
+
+          print(f"bandit findings (total): {len(results)}")
+          print(f"bandit findings (MEDIUM/HIGH): {len(bad)}")
+
+          raise SystemExit(1 if bad else 0)
+          PY
+
+      - name: Upload security artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-reports
+          path: reports/
+          if-no-files-found: ignore
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## 🔐 Security Gate"
+            echo
+            echo "- SCA: **pip-audit** (fails on vulnerabilities)"
+            echo "- SAST: **bandit** (fails on MEDIUM/HIGH)"
+            echo
+            echo "Artifacts: \`security-reports\` (pip-audit.json, bandit.json)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  secrets:
+    name: Secrets Scan (gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Harden Runner (audit)
+        uses: step-security/harden-runner@c6295a65d1254861815972266d5933fd6e532bdf # v2.11.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: "false"
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "true"
+          GITLEAKS_ENABLE_SUMMARY: "true"
+
+  container:
+    name: Container Gate (Dockerfile + image scan)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - name: Harden Runner (audit)
+        uses: step-security/harden-runner@c6295a65d1254861815972266d5933fd6e532bdf # v2.11.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare report directory
+        run: mkdir -p reports
+
+      - name: Hadolint (Dockerfile)
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: Dockerfile
+          format: sarif
+          output-file: reports/hadolint.sarif
+          failure-threshold: warning
+
+      - name: Build image
+        run: |
+          docker build -t secure-rag-pipeline:${{ github.sha }} .
+
+      - name: Trivy (image scan)
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          image-ref: 'secure-rag-pipeline:${{ github.sha }}'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Trivy (fs scan)
+        uses: aquasecurity/trivy-action@0.33.1
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: 'CRITICAL,HIGH'
+
+      - name: Upload container artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: container-reports
+          path: reports/
+          if-no-files-found: ignore
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## 🐳 Container Gate"
+            echo
+            echo "- Dockerfile lint: **hadolint**"
+            echo "- Image scan: **trivy image** (CRITICAL/HIGH)"
+            echo "- Repo scan: **trivy fs** (CRITICAL/HIGH)"
+            echo
+            echo "Artifacts: \`container-reports\` (hadolint.sarif)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  codeql:
+    name: Optional SAST (CodeQL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.enable_codeql }}
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: python
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@v3
